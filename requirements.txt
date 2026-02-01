@@ -1,0 +1,22 @@
+# FastAPI server
+fastapi>=0.109.0
+uvicorn[standard]
+websockets
+
+# Audio processing
+numpy
+soundfile
+librosa
+
+# MLX for Apple Silicon
+mlx
+
+# Whisper dependencies
+tqdm
+tiktoken
+huggingface_hub
+torch
+
+# CoreML (optional, for faster inference)
+coremltools
+onnxruntime

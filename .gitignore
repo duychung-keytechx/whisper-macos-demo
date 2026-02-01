@@ -1,0 +1,33 @@
+# Virtual environment
+venv/
+.venv/
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs
+logdir/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude
+.claude/
+
+# macOS
+.DS_Store
+
+# Model files
+*.pt
+*.pth
+*.bin
