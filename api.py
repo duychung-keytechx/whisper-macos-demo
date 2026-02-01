@@ -37,7 +37,7 @@ USE_COREML = os.getenv("USE_COREML", "false").lower() == "true"
 
 # Audio processing constants
 SAMPLE_RATE = 16000
-CHUNK_DURATION_SECONDS = 0.5  # Process audio every N seconds (lower = more responsive, higher = more accurate)
+CHUNK_DURATION_SECONDS = 0.3  # Process audio every N seconds
 
 # Global model
 whisper_model = None
@@ -85,6 +85,7 @@ class ClientSession:
     """Per-client session using SimulWhisperOnline"""
 
     SAMPLING_RATE = 16000
+    MAX_AUDIO_SECONDS = 25  # Reset model before 30s buffer fills
 
     def __init__(self, model):
         # Create a wrapper that mimics the ASR interface
@@ -92,70 +93,59 @@ class ClientSession:
             def __init__(self, m):
                 self.model = m
 
+        self.model = model
         self.online = SimulWhisperOnline(ASRWrapper(model))
         self.pending_samples = 0
-        self.last_sent_text = ""
-        self.accumulated_text = ""  # Accumulated transcription
+        self.total_audio_seconds = 0
+        self.last_text = ""
 
     def add_audio(self, audio_chunk):
         """Add audio chunk"""
-        # SimulWhisperOnline expects audio as numpy/mlx array
         self.online.insert_audio_chunk(audio_chunk)
         self.pending_samples += len(audio_chunk)
+        self.total_audio_seconds += len(audio_chunk) / self.SAMPLING_RATE
+
+        # Reset model before buffer overflows to prevent hangs
+        if self.total_audio_seconds >= self.MAX_AUDIO_SECONDS:
+            logger.info(f"Resetting model after {self.total_audio_seconds:.1f}s of audio")
+            self.online.init()  # Reset the online processor
+            self.total_audio_seconds = 0
+            mx.clear_cache()
 
     def should_process(self):
         """Check if we have enough audio to process"""
         return self.pending_samples >= self.SAMPLING_RATE * CHUNK_DURATION_SECONDS
 
     def process(self):
-        """Process and get transcription"""
+        """Process and get transcription - returns raw model output"""
         self.pending_samples = 0
         beg, end, text = self.online.process_iter()
 
+        # Clear MLX cache to prevent memory buildup
+        mx.clear_cache()
+
         if text and text.strip():
             new_text = text.strip()
-            logger.info(f"Model returned: '{new_text}'")
-
-            # Check if this is new text or a refinement of existing
-            # If new text doesn't start with accumulated, it's new content
-            if not self.accumulated_text:
-                self.accumulated_text = new_text
-            elif new_text.startswith(self.accumulated_text):
-                # Model is refining/extending - use the new full text
-                self.accumulated_text = new_text
-            elif self.accumulated_text.startswith(new_text):
-                # Model output is shorter - keep what we have (probably refinement in progress)
-                pass
-            else:
-                # Completely new text - append it
-                self.accumulated_text = self.accumulated_text + " " + new_text
-
-            logger.info(f"Accumulated: '{self.accumulated_text}'")
-            return self.accumulated_text
-
-        return self.accumulated_text if self.accumulated_text else None
+            if new_text != self.last_text:
+                self.last_text = new_text
+                logger.info(f"Model output: '{new_text}'")
+                return new_text
+        return None
 
     def finish(self):
         """Finalize transcription"""
         beg, end, text = self.online.finish()
-
         if text and text.strip():
-            final_text = text.strip()
-            # Use final text if it's longer/better, otherwise use accumulated
-            if len(final_text) > len(self.accumulated_text):
-                return final_text
-            elif self.accumulated_text:
-                return self.accumulated_text
-            return final_text
-
-        return self.accumulated_text if self.accumulated_text else None
+            return text.strip()
+        return None
 
     def reset(self):
         """Reset for new session"""
         self.online.init()
         self.pending_samples = 0
-        self.last_sent_text = ""
-        self.accumulated_text = ""
+        self.total_audio_seconds = 0
+        self.last_text = ""
+        mx.clear_cache()
 
 
 # Per-client sessions
@@ -202,13 +192,12 @@ async def websocket_transcribe(websocket: WebSocket):
                 if session.should_process():
                     text = session.process()
 
-                    if text and text != session.last_sent_text:
-                        # Send as partial (accumulated hypothesis)
+                    if text:
+                        # Send raw model output as "chunk" - frontend will accumulate
                         await websocket.send_json({
-                            "type": "partial",
+                            "type": "chunk",
                             "text": text
                         })
-                        session.last_sent_text = text
 
     except WebSocketDisconnect:
         logger.info(f"Client {client_id} disconnected")

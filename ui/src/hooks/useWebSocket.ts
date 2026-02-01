@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface TranscriptMessage {
-  type: 'partial' | 'final' | 'pong'
+  type: 'partial' | 'final' | 'chunk' | 'pong'
   text?: string
 }
 
 interface UseWebSocketOptions {
   url: string
+  onChunk?: (text: string) => void
   onPartial?: (text: string) => void
   onFinal?: (text: string) => void
   pingInterval?: number
@@ -14,6 +15,7 @@ interface UseWebSocketOptions {
 
 export function useWebSocket({
   url,
+  onChunk,
   onPartial,
   onFinal,
   pingInterval = 15000,
@@ -46,17 +48,15 @@ export function useWebSocket({
     ws.onmessage = (event) => {
       try {
         const data: TranscriptMessage = JSON.parse(event.data)
-        console.log('[WS] Received:', data.type, data.text)
-        if (data.type === 'partial' && data.text) {
-          console.log('[WS] Calling onPartial with:', data.text)
+        if (data.type === 'chunk' && data.text) {
+          onChunk?.(data.text)
+        } else if (data.type === 'partial' && data.text) {
           onPartial?.(data.text)
         } else if (data.type === 'final' && data.text) {
-          console.log('[WS] Calling onFinal with:', data.text)
           onFinal?.(data.text)
         }
-        // Ignore pong messages
       } catch {
-        console.error('Failed to parse WebSocket message:', event.data)
+        // Ignore parse errors
       }
     }
 
@@ -71,7 +71,7 @@ export function useWebSocket({
         pingIntervalRef.current = null
       }
     }
-  }, [url, onPartial, onFinal, pingInterval])
+  }, [url, onChunk, onPartial, onFinal, pingInterval])
 
   const disconnect = useCallback(() => {
     if (pingIntervalRef.current) {

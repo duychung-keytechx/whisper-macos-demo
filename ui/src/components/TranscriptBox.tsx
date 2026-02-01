@@ -18,9 +18,8 @@ function WaitingIndicator() {
 }
 
 export function TranscriptBox({ transcript, partialText, isRecording }: TranscriptBoxProps) {
-  // During recording: show partial (current hypothesis for all audio)
-  // After recording: show final transcript
-  const displayText = isRecording ? partialText : (transcript || partialText)
+  // Show accumulated transcript
+  const displayText = transcript || ''
 
   return (
     <Card className="min-h-[300px] bg-white">
@@ -32,7 +31,7 @@ export function TranscriptBox({ transcript, partialText, isRecording }: Transcri
       <CardContent>
         <div className="whitespace-pre-wrap text-lg leading-relaxed">
           <span className="text-black">{displayText}</span>
-          {isRecording && !partialText && <WaitingIndicator />}
+          {isRecording && <WaitingIndicator />}
         </div>
       </CardContent>
     </Card>

@@ -10,22 +10,28 @@ const WS_URL = 'ws://localhost:8000/ws/transcribe'
 
 function App() {
   const [transcript, setTranscript] = useState('')
-  const [partialText, setPartialText] = useState('')
+  const [currentChunk, setCurrentChunk] = useState('')
+
+  // Handle new chunk from server - accumulate into transcript
+  const handleChunk = useCallback((text: string) => {
+    setCurrentChunk(text)
+    setTranscript(prev => prev ? prev + ' ' + text : text)
+  }, [])
 
   const handlePartial = useCallback((text: string) => {
-    console.log('[App] handlePartial:', text)
-    setPartialText(text)
+    setCurrentChunk(text)
   }, [])
 
   const handleFinal = useCallback((text: string) => {
-    console.log('[App] handleFinal:', text)
-    // Final contains the complete transcription, replace not append
-    setTranscript(text)
-    setPartialText('')
-  }, [])
+    if (text.length > transcript.length) {
+      setTranscript(text)
+    }
+    setCurrentChunk('')
+  }, [transcript])
 
   const { connect, disconnect, sendAudio, isConnected, error: wsError } = useWebSocket({
     url: WS_URL,
+    onChunk: handleChunk,
     onPartial: handlePartial,
     onFinal: handleFinal,
   })
@@ -36,7 +42,7 @@ function App() {
 
   const handleStart = useCallback(async () => {
     setTranscript('')
-    setPartialText('')
+    setCurrentChunk('')
     connect()
     await startRecording()
   }, [connect, startRecording])
@@ -97,7 +103,7 @@ function App() {
         </Button>
       </div>
 
-      <TranscriptBox transcript={transcript} partialText={partialText} isRecording={isRecording} />
+      <TranscriptBox transcript={transcript} partialText={currentChunk} isRecording={isRecording} />
     </div>
   )
 }
