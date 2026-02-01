@@ -1,39 +1,33 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-
 interface TranscriptBoxProps {
   transcript: string
-  partialText: string
   isRecording?: boolean
 }
 
 // Pulsing dots indicator
 function WaitingIndicator() {
   return (
-    <span className="inline-flex items-center gap-0.5 ml-1">
-      <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.3s]" />
-      <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.15s]" />
-      <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" />
+    <span className="ml-1 inline-flex items-center gap-0.5">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" />
     </span>
   )
 }
 
-export function TranscriptBox({ transcript, partialText, isRecording }: TranscriptBoxProps) {
-  // Show accumulated transcript
+export function TranscriptBox({ transcript, isRecording }: TranscriptBoxProps) {
   const displayText = transcript || ''
+  const isEmpty = !displayText && !isRecording
 
   return (
-    <Card className="min-h-[300px] bg-white">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-normal text-gray-600">
-          Transcription
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="min-h-[200px] rounded-2xl bg-zinc-900 p-6">
+      {isEmpty ? (
+        <p className="text-center text-zinc-600">Your transcription will appear here...</p>
+      ) : (
         <div className="whitespace-pre-wrap text-lg leading-relaxed">
-          <span className="text-black">{displayText}</span>
+          <span className="text-zinc-100">{displayText}</span>
           {isRecording && <WaitingIndicator />}
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   )
 }

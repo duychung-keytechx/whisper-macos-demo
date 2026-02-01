@@ -32,12 +32,12 @@ app.add_middleware(
 # Model configuration
 MODEL_NAME = os.getenv("WHISPER_MODEL", "large-v3")  # tiny, base, small, medium, large-v3
 MODEL_PATH = os.getenv("MODEL_PATH", f"mlx_{MODEL_NAME}")
-LANGUAGE = os.getenv("LANGUAGE", "en")
+LANGUAGE = os.getenv("LANGUAGE", "vi")
 USE_COREML = os.getenv("USE_COREML", "false").lower() == "true"
 
 # Audio processing constants
 SAMPLE_RATE = 16000
-CHUNK_DURATION_SECONDS = 0.3  # Process audio every N seconds
+CHUNK_DURATION_SECONDS = 0.3  # Process audio every N seconds (lower is more responsive but need to be considered)
 
 # Global model
 whisper_model = None

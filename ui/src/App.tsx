@@ -1,109 +1,118 @@
 import { useCallback, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Visualizer } from '@/components/Visualizer'
 import { TranscriptBox } from '@/components/TranscriptBox'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useAudioRecorder } from '@/hooks/useAudioRecorder'
 
 const WS_URL = 'ws://localhost:8000/ws/transcribe'
 
+// Simple audio bars animation - CSS-based for reliability
+const AudioBars = () => (
+  <div className="flex items-center justify-center gap-1">
+    {[0, 1, 2, 3, 4].map((i) => (
+      <div
+        key={i}
+        className="w-2 rounded-full bg-red-500"
+        style={{
+          animation: `audioBar 0.8s ease-in-out infinite`,
+          animationDelay: `${i * 0.1}s`,
+          height: '40px',
+        }}
+      />
+    ))}
+    <style>{`
+      @keyframes audioBar {
+        0%, 100% { transform: scaleY(0.3); }
+        50% { transform: scaleY(1); }
+      }
+    `}</style>
+  </div>
+)
+
+// Microphone icon for idle state
+const MicIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+    <line x1="12" x2="12" y1="19" y2="22"/>
+  </svg>
+)
+
 function App() {
   const [transcript, setTranscript] = useState('')
-  const [currentChunk, setCurrentChunk] = useState('')
 
-  // Handle new chunk from server - accumulate into transcript
   const handleChunk = useCallback((text: string) => {
-    setCurrentChunk(text)
     setTranscript(prev => prev ? prev + ' ' + text : text)
   }, [])
 
-  const handlePartial = useCallback((text: string) => {
-    setCurrentChunk(text)
+  const handlePartial = useCallback((_text: string) => {
+    // Partial updates are handled by chunks
   }, [])
 
   const handleFinal = useCallback((text: string) => {
     if (text.length > transcript.length) {
       setTranscript(text)
     }
-    setCurrentChunk('')
   }, [transcript])
 
-  const { connect, disconnect, sendAudio, isConnected, error: wsError } = useWebSocket({
+  const { connect, disconnect, sendAudio, error: wsError } = useWebSocket({
     url: WS_URL,
     onChunk: handleChunk,
     onPartial: handlePartial,
     onFinal: handleFinal,
   })
 
-  const { startRecording, stopRecording, getFrequencyData, isRecording, error: audioError } = useAudioRecorder({
+  const { startRecording, stopRecording, isRecording, error: audioError } = useAudioRecorder({
     onAudioData: sendAudio,
   })
 
-  const handleStart = useCallback(async () => {
-    setTranscript('')
-    setCurrentChunk('')
-    connect()
-    await startRecording()
-  }, [connect, startRecording])
-
-  const handleStop = useCallback(() => {
-    stopRecording()
-    disconnect()
-  }, [stopRecording, disconnect])
+  const handleToggle = useCallback(async () => {
+    if (isRecording) {
+      stopRecording()
+      disconnect()
+    } else {
+      setTranscript('')
+      connect()
+      await startRecording()
+    }
+  }, [isRecording, connect, disconnect, startRecording, stopRecording])
 
   const error = wsError || audioError
 
   return (
-    <div className="dark mx-auto min-h-screen max-w-2xl p-6">
-      <div className="mb-8 text-center">
-        <h1 className="mb-2 text-3xl font-bold text-primary">Lightning Whisper</h1>
-        <p className="text-muted-foreground">
-          Real-time Speech-to-Text on Apple Silicon with SimulWhisper
-        </p>
-      </div>
-
-      <div className="mb-6 flex justify-center">
-        {error ? (
-          <Badge variant="destructive">{error}</Badge>
-        ) : isRecording ? (
-          <Badge variant="destructive" className="animate-pulse">
-            Recording...
-          </Badge>
-        ) : isConnected ? (
-          <Badge variant="secondary">Connected</Badge>
+    <div className="dark mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center p-6">
+      {/* Recording Button */}
+      <button
+        onClick={handleToggle}
+        className={`relative mb-4 flex h-32 w-32 items-center justify-center rounded-full transition-all duration-300 ${
+          isRecording
+            ? 'bg-red-500/20 shadow-lg shadow-red-500/30'
+            : 'bg-zinc-800 hover:bg-zinc-700 hover:shadow-lg'
+        }`}
+      >
+        {isRecording ? (
+          <AudioBars />
         ) : (
-          <Badge variant="outline">Click Start to begin</Badge>
+          <div className="text-zinc-300">
+            <MicIcon />
+          </div>
         )}
-      </div>
+      </button>
 
-      <div className="mb-6">
-        <Visualizer
-          getFrequencyData={getFrequencyData}
-          isActive={isRecording}
-        />
-      </div>
+      {/* Status Text */}
+      <p className="mb-8 text-sm text-zinc-500">
+        {error ? (
+          <span className="text-red-400">{error}</span>
+        ) : isRecording ? (
+          'Tap to stop recording'
+        ) : (
+          'Tap to start recording'
+        )}
+      </p>
 
-      <div className="mb-6 flex justify-center gap-4">
-        <Button
-          size="lg"
-          onClick={handleStart}
-          disabled={isRecording}
-          className={isRecording ? 'animate-pulse bg-destructive' : ''}
-        >
-          {isRecording ? 'Recording...' : 'Start Recording'}
-        </Button>
-        <Button
-          size="lg"
-          variant="destructive"
-          onClick={handleStop}
-          disabled={!isRecording}
-        >
-          Stop
-        </Button>
+      {/* Transcript */}
+      <div className="w-full">
+        <TranscriptBox transcript={transcript} isRecording={isRecording} />
       </div>
-
-      <TranscriptBox transcript={transcript} partialText={currentChunk} isRecording={isRecording} />
     </div>
   )
 }
