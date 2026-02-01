@@ -32,7 +32,7 @@ app.add_middleware(
 # Model configuration
 MODEL_NAME = os.getenv("WHISPER_MODEL", "large-v3")  # tiny, base, small, medium, large-v3
 MODEL_PATH = os.getenv("MODEL_PATH", f"mlx_{MODEL_NAME}")
-LANGUAGE = os.getenv("LANGUAGE", "vi")
+LANGUAGE = os.getenv("LANGUAGE", "en")
 USE_COREML = os.getenv("USE_COREML", "false").lower() == "true"
 
 # Audio processing constants
@@ -41,6 +41,9 @@ CHUNK_DURATION_SECONDS = 0.3  # Process audio every N seconds (lower is more res
 
 # Global model
 whisper_model = None
+
+# Fine-grained lock for model inference (protects concurrent access)
+model_inference_lock = asyncio.Lock()
 
 
 def load_model():
@@ -100,17 +103,38 @@ class ClientSession:
         self.last_text = ""
 
     def add_audio(self, audio_chunk):
-        """Add audio chunk"""
-        self.online.insert_audio_chunk(audio_chunk)
-        self.pending_samples += len(audio_chunk)
-        self.total_audio_seconds += len(audio_chunk) / self.SAMPLING_RATE
+        """Add audio chunk. Returns flushed text if reset occurred, None otherwise."""
+        chunk_duration = len(audio_chunk) / self.SAMPLING_RATE
+        reset_text = None
 
-        # Reset model before buffer overflows to prevent hangs
-        if self.total_audio_seconds >= self.MAX_AUDIO_SECONDS:
+        # Check if we need to reset BEFORE adding this chunk to avoid losing audio
+        if self.total_audio_seconds + chunk_duration >= self.MAX_AUDIO_SECONDS:
             logger.info(f"Resetting model after {self.total_audio_seconds:.1f}s of audio")
+
+            # Flush any pending transcription before reset
+            try:
+                beg, end, text = self.online.finish()
+                if text and text.strip():
+                    reset_text = text.strip()
+                    logger.info(f"Flushed before reset: '{reset_text}'")
+            except Exception as e:
+                logger.warning(f"Error flushing before reset: {e}")
+
             self.online.init()  # Reset the online processor
             self.total_audio_seconds = 0
+            self.pending_samples = 0
+            self.last_text = ""
             mx.clear_cache()
+
+        # Now add the audio chunk (to fresh buffer if reset occurred)
+        self.online.insert_audio_chunk(audio_chunk)
+        self.pending_samples += len(audio_chunk)
+        self.total_audio_seconds += chunk_duration
+
+        # Clear cache frequently to prevent memory buildup
+        mx.clear_cache()
+
+        return reset_text
 
     def should_process(self):
         """Check if we have enough audio to process"""
@@ -186,18 +210,29 @@ async def websocket_transcribe(websocket: WebSocket):
                 # Convert bytes to numpy array (assuming 16-bit PCM)
                 audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
 
-                session.add_audio(audio_chunk)
+                # Fine-grained lock: only held during model inference operations
+                async with model_inference_lock:
+                    # add_audio returns flushed text if a reset occurred
+                    reset_text = session.add_audio(audio_chunk)
 
-                # Process audio when enough samples accumulated
-                if session.should_process():
-                    text = session.process()
+                    # Process audio when enough samples accumulated
+                    text = None
+                    if session.should_process():
+                        text = session.process()
 
-                    if text:
-                        # Send raw model output as "chunk" - frontend will accumulate
-                        await websocket.send_json({
-                            "type": "chunk",
-                            "text": text
-                        })
+                # Send results outside the lock (I/O doesn't need lock)
+                if reset_text:
+                    await websocket.send_json({
+                        "type": "chunk",
+                        "text": reset_text
+                    })
+
+                if text:
+                    # Send raw model output as "chunk" - frontend will accumulate
+                    await websocket.send_json({
+                        "type": "chunk",
+                        "text": text
+                    })
 
     except WebSocketDisconnect:
         logger.info(f"Client {client_id} disconnected")
@@ -209,7 +244,9 @@ async def websocket_transcribe(websocket: WebSocket):
         # Get final transcription and send it
         if client_id in client_sessions:
             try:
-                final_text = session.finish()
+                # Acquire lock for final inference
+                async with model_inference_lock:
+                    final_text = session.finish()
                 if final_text:
                     try:
                         await websocket.send_json({
